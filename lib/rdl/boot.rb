@@ -213,7 +213,7 @@ module RDL
       @infer_added = nil
       # @module_mixees = Hash.new - resetting this breaks test cases that assume
       # we know which modules are mixed into which other modules
-
+      RDL::Heuristic.empty_cache!
       @parser = RDL::Type::Parser.new
 
       # Map from file names to [digest, cache] where 2nd elt maps

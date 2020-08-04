@@ -4,6 +4,10 @@ class RDL::Heuristic
 
   @meth_cache = {}
 
+  def self.empty_cache!
+    @meth_cache = {}
+  end
+
   def self.add(name, &blk)
     raise RuntimeError, "Expected heuristic name to be Symbol, given #{name}." unless name.is_a? Symbol
     raise RuntimeError, "Expected block to be provided for heuristic." if blk.nil?
@@ -17,10 +21,10 @@ class RDL::Heuristic
     return @meth_cache[meth_names] if @meth_cache.key? meth_names
     RDL::Logging.log :heuristics, :debug, "Checking matching classes for #{meth_names}"
 
-    matching_classes = ObjectSpace.each_object(Class).select { |c|
-      class_methods = c.instance_methods | RDL::Globals.info.get_methods_from_class(c.to_s)
-      (meth_names - class_methods).empty? } ## will only be empty if meth_names is a subset of c.instance_methods
-    matching_classes += ObjectSpace.each_object(Module).select { |c|
+    #matching_classes = ObjectSpace.each_object(Class).select { |c|
+    #  class_methods = c.instance_methods | RDL::Globals.info.get_methods_from_class(c.to_s)
+    #  (meth_names - class_methods).empty? } ## will only be empty if meth_names is a subset of c.instance_methods
+    matching_classes = ObjectSpace.each_object(Module).select { |c|
       class_methods = c.instance_methods | RDL::Globals.info.get_methods_from_class(c.to_s)
       (meth_names - class_methods).empty? } ## will only be empty if meth_names is a subset of c.instance_methods
 
@@ -37,7 +41,7 @@ class RDL::Heuristic
     return if struct_types.empty?
     meth_names = struct_types.map { |st| st.methods.keys }.flatten.uniq
     matching_classes = matching_classes(meth_names)
-    matching_classes.reject! { |c| c.to_s.start_with?("#<Class") || /[^:]*::[a-z]/.match?(c.to_s) || c.to_s.include?("ARGF") } ## weird few constants where :: is followed by a lowecase letter... it's not a class and I can't find anything written about it.
+    matching_classes.reject! { |c| c.to_s.start_with?("#<") || /[^:]*::[a-z]/.match?(c.to_s) || c.to_s.include?("ARGF") } ## weird few constants where :: is followed by a lowecase letter... it's not a class and I can't find anything written about it.
     ## TODO: special handling for arrays/hashes/generics?
     ## TODO: special handling for Rails models? see Bree's `active_record_match?` method
     #raise "No matching classes found for structural types with methods #{meth_names}." if matching_classes.empty?
@@ -82,12 +86,14 @@ class String
 
 end
 
+
 if defined? Rails
   RDL::Heuristic.add(:is_model) { |var| if var.base_name.camelize.is_rails_model? then var.base_name.to_type end }
   RDL::Heuristic.add(:is_pluralized_model) { |var| if var.base_name.is_pluralized_model? then var.base_name.model_set_type end }
 end
 
 RDL::Heuristic.add(:struct_to_nominal) { |var| t1 = Time.now; g = RDL::Heuristic.struct_to_nominal(var); $stn = $stn + (Time.now - t1); g }
+
 RDL::Heuristic.add(:int_names) { |var| if var.base_name.end_with?("id") || (var.base_name.end_with? "num") || (var.base_name.end_with? "count") then RDL::Globals.types[:integer] end }
 RDL::Heuristic.add(:int_array_name) { |var| if var.base_name.end_with?("ids") || (var.base_name.end_with? "nums") || (var.base_name.end_with? "counts") then RDL::Globals.parser.scan_str "#T Array<Integer>" end }
 RDL::Heuristic.add(:predicate_method) { |var| if var.base_name.end_with?("?") then RDL::Globals.types[:bool] end }

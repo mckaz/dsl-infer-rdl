@@ -107,6 +107,7 @@ module RDL::Typecheck
             RDL::Logging.log :hueristic, :debug, "Heuristic Applied: #{name}"
             @new_constraints = true if !new_cons.empty?
             RDL::Logging.log :inference, :trace, "New Constraints branch A" if !new_cons.empty?
+            @heuristic_counts[name] += 1
             return typ
             #sol = typ
           end
@@ -158,7 +159,6 @@ module RDL::Typecheck
       ## no new constraints in this case so we'll leave it as is
       sol = var
     end
-
     return sol
   end
 
@@ -252,7 +252,7 @@ module RDL::Typecheck
     var_types = 0
     typ_sols.each_pair { |km, typ|
       klass, meth = km
-
+      
       orig_typ = RDL::Globals.info.get(klass, meth, :orig_type)
       if orig_typ.is_a?(Array)
         raise "expected just one original type for #{klass}##{meth}" unless orig_typ.size == 1
@@ -260,7 +260,19 @@ module RDL::Typecheck
       end
       if orig_typ.nil?
         #puts "Original type not found for #{klass}##{meth}."
-        #puts "Inferred type is: #{typ}"
+      #puts "Inferred type is: #{typ}"
+        if typ.is_a?(RDL::Type::MethodType)
+          meth_types += 1
+          total_potential += typ.args.size + 1 ## 1 for ret
+          if typ.solution.block.is_a?(RDL::Type::MethodType)
+            total_potential += typ.solution.block.args.size + 1
+          end
+        elsif typ.is_a?(RDL::Type::VarType)
+          var_types += 1
+          total_potential += 1
+        else
+          raise "Got unexpected value #{typ} of type #{typ.class}."
+        end
       elsif orig_typ.to_s == typ.solution.to_s
         #puts "Type for #{klass}##{meth} was correctly inferred, as: "
         #puts typ
@@ -319,6 +331,7 @@ module RDL::Typecheck
     RDL::Logging.log :inference, :info, "Total # variable types: #{var_types}"
     RDL::Logging.log :inference, :info, "Total # individual types: #{total_potential}"
   rescue => e
+    puts "GOT ERROR #{e}"
     RDL::Logging.log :inference, :error, "Report Generation Error"
     RDL::Logging.log :inference, :debug_error, "... got #{e}"
     raise e unless RDL::Config.instance.continue_on_errors
@@ -333,6 +346,11 @@ module RDL::Typecheck
     counter = 0;
 
     typ_sols = {}
+    ## Hash<Symbol, Integer> mapping heuristic names to the number of times they were used.
+    ## Note: Even though we perform solution extraction multiple times, it is *okay* to only
+    ## keep one count of heuristic uses, because once a heuristic is successfully applied,
+    ## its solution will be added to the constraint graph and it won't be used for the same case again.
+    @heuristic_counts = Hash.new 0
     loop do
       counter += 1
       @new_constraints = false
@@ -343,7 +361,6 @@ module RDL::Typecheck
       RDL::Globals.constrained_types.each { |klass, name|
         begin
           RDL::Logging.log :inference, :debug, "Extracting #{RDL::Util.pp_klass_method(klass, name)}"
-
           RDL::Type::VarType.no_print_XXX!
           typ = RDL::Globals.info.get(klass, name, :type)
           if typ.is_a?(Array)
@@ -374,14 +391,25 @@ module RDL::Typecheck
           end
         rescue => e
           RDL::Logging.log :inference, :debug_error, "Error while exctracting solution for #{RDL::Util.pp_klass_method(klass, name)}: #{e}; continuing..."
-          raise e unless RDL::Config.instance.continue_on_errors
-         end
+          puts "Error while exctracting solution for #{RDL::Util.pp_klass_method(klass, name)}: #{e}; continuing..."
+          puts e.backtrace
+          raise(e) unless RDL::Config.instance.continue_on_errors
+        end
       }
     break if !@new_constraints
     end
 
   ensure
     return make_extraction_report(typ_sols)
+  end
+
+  def self.log_heuristic_counts(log_type)
+    @heuristic_counts.each { |name, count|
+      RDL::Logging.log :inference, log_type, "Heuristic #{name} uses: #{count}"
+    }
+    if @heuristic_counts.empty?
+      RDL::Logging.log :inference, log_type, "No heuristics used!"
+    end
   end
 
 

@@ -357,7 +357,7 @@ module RDL::Typecheck
 
     RDL::Globals.info.set(klass, meth, :typechecked, true)
 
-    RDL::Globals.constrained_types << [klass, meth]
+    RDL::Globals.constrained_types << [klass, meth] unless RDL::Globals.constrained_types.include? [klass, name]
     RDL::Logging.log :inference, :debug, "Done with constraint generation."
   end
 
@@ -1148,9 +1148,12 @@ RUBY
       # next: before loop guard; argument not allowed
       # retry: not allowed
       # redo: after loop guard, which is same as break
+      old_num_casts = @num_casts ## only want to count casts in loop once
       env_break, _ = tc(scope, env, e.children[0]) # guard can have any type, may exit after checking guard
       scope_merge(scope, break: env_break, tbreak: RDL::Globals.types[:nil], next: env, redo: env_break) { |lscope|
+
         begin
+          @num_casts = 0
           old_break = lscope[:break]
           old_next = lscope[:next]
           old_tbreak = lscope[:tbreak]
@@ -1161,6 +1164,7 @@ RUBY
           env_guard, _ = tc(lscope, lscope[:next], e.children[0]) # then guard runs
           lscope[:break] = lscope[:redo] = Env.join(e, lscope[:break], lscope[:redo], env_guard)
         end until old_break == lscope[:break] && old_next == lscope[:next] && old_tbreak == lscope[:tbreak]
+        @num_casts += old_num_casts
         [lscope[:break], lscope[:tbreak].canonical]
       }
     when :while_post, :until_post
@@ -1168,12 +1172,14 @@ RUBY
       # next: before loop guard; argument not allowed
       # retry: not allowed
       # redo: beginning of body, which is same as after guard, i.e., same as break
+      old_num_casts = @num_casts ## only want to count casts in loop once
       scope_merge(scope, break: nil, tbreak: RDL::Globals.types[:nil], next: nil, redo: nil) { |lscope|
         if e.children[1]
           env_body, _ = tc(lscope, env, e.children[1])
           lscope[:next] = Env.join(e, lscope[:next], env_body)
         end
         begin
+          @num_casts = 0
           old_break = lscope[:break]
           old_next = lscope[:next]
           old_tbreak = lscope[:tbreak]
@@ -1184,6 +1190,7 @@ RUBY
             lscope[:next] = Env.join(e, lscope[:next], env_body)
           end
         end until old_break == lscope[:break] && old_next == lscope[:next] && old_tbreak == lscope[:tbreak]
+        @num_casts += old_num_casts
         [lscope[:break], lscope[:tbreak].canonical]
       }
     when :for
@@ -1242,7 +1249,9 @@ RUBY
         # if the loop always exits via break, then return type will come only from break, and otherwise the
         # collection is returned. But it's hard to tell statically if there are only exits via break, so
         # conservatively assume that at least the collection is returned.
+        old_num_casts = @num_casts ## only want to count casts in loop once
         begin
+          @num_casts = 0
           old_break = lscope[:break]
           old_tbreak = lscope[:tbreak]
           old_tnext = lscope[:tnext]
@@ -1252,6 +1261,7 @@ RUBY
             lscope[:break] = lscope[:next] = lscope[:redo] = Env.join(e, lscope[:break], lscope[:next], lscope[:redo], env_body)
           end
         end until old_break == lscope[:break] && old_tbreak == lscope[:tbreak] && old_tnext == lscope[:tnext]
+        @num_casts += old_num_casts
         [lscope[:break], lscope[:tbreak].canonical] ## going very conservative on this one
       }
     when :break, :redo, :next, :retry
@@ -1292,7 +1302,9 @@ RUBY
       # similarly, local variables assigned in resbody will be initialized to nil even if the resbody
       # is never triggered
       scope_merge(scope, retry: env, exn: nil) { |rscope|
+        old_num_casts = @num_casts ## only want to count casts in loop once
         begin
+          @num_casts = 0
           old_retry = rscope[:retry]
           env_body, tbody = tc(rscope, rscope[:retry], e.children[0])
           tres = [tbody] # note throw away inferred types from previous iterations---should be okay since should be monotonic
@@ -1310,6 +1322,7 @@ RUBY
             end
           end
         end until old_retry == rscope[:retry]
+        @num_casts += old_num_casts
         # TODO: variables newly bound in *env_res should be unioned with nil
         [Env.join(e, *env_res), RDL::Type::UnionType.new(*tres).canonical]
       }
@@ -2477,7 +2490,7 @@ RUBY
   def self.make_unknown_var_type(klass, name, kind_text)
     var_type = RDL::Type::VarType.new(cls: klass, name: name, category: kind_text)
     RDL::Globals.info.set(klass, name, :type, var_type)
-    RDL::Globals.constrained_types << [klass, name]
+    RDL::Globals.constrained_types << [klass, name] unless RDL::Globals.constrained_types.include? [klass, name]
     return var_type
   end
 

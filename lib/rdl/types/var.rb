@@ -55,7 +55,6 @@ module RDL::Type
     # [+ ast +] is the AST where the bound originates from, used for error messages.
     # [+ new_cons +] is a Hash<VarType, Array<[:upper or :lower, Type, AST]>>. When provided, can be used to roll back constraints in case an error pops up.
     def add_and_propagate_upper_bound(typ, ast, new_cons = {})
-
       return if self.equal?(typ)
       if !@ubounds.any? { |t, a| t == typ }
         @ubounds << [typ, ast]
@@ -164,9 +163,9 @@ module RDL::Type
     end
 
     def ==(other)
-      return false if other.nil?
+      return false unless other.instance_of? self.class
       other = other.canonical
-      return (other.instance_of? self.class) && other.to_s == to_s#(other.name.to_s == @name.to_s)
+      return other.to_s == to_s#(other.name.to_s == @name.to_s)
     end
 
     alias eql? ==
