@@ -6,8 +6,8 @@ module RDL::Reporting
     include RDL::Reporting::CSV
     include RDL::Reporting::Sorbet
 
-    class MethodInfo
-      attr_accessor :klass, :method_name, :type, :orig_type, :source_code,
+    class TypeInfo
+      attr_accessor :klass, :name, :type, :orig_type, :source_code,
                     :comments
     end
 
@@ -17,7 +17,7 @@ module RDL::Reporting
       RDL::Logging.debug :inference, "MK #{full_name}"
       @full_name = full_name
       @children = {}
-      @methods = []
+      @types = []
     end
 
     def [](className)
@@ -37,16 +37,16 @@ module RDL::Reporting
     end
 
     def <<(input)
-      meth = MethodInfo.new
+      t = TypeInfo.new
 
-      meth.klass       = input[:klass]
-      meth.method_name = input[:method_name]
-      meth.type        = input[:type]
-      meth.orig_type   = input[:orig_type]
-      meth.source_code = input[:source_code]
-      meth.comments    = input[:comments]
+      t.klass       = input[:klass]
+      t.name = input[:name]
+      t.type        = input[:type]
+      t.orig_type   = input[:orig_type]
+      t.source_code = input[:source_code]
+      t.comments    = input[:comments]
 
-      @methods << meth
+      @types << t
     end
 
   end

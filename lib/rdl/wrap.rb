@@ -856,10 +856,14 @@ module RDL
     raise "Expected num_times to be positive int, got #{num_times}." unless num_times > 0
     run_times = []
     stn_times = []
+    $num_unknown_library_types = 0
     num_times.times { |run_count|
       RDL::Config.instance.use_unknown_types = true
       $stn = 0
+      $stn_unions = 0
       num_casts = 0
+      num_choice_types = 0
+      num_overloaded_meths = 0
       RDL::Heuristic.empty_cache!
 
       RDL::Globals.constrained_types.each { |klass, name|
@@ -872,6 +876,8 @@ module RDL
         begin
           RDL::Typecheck.infer klass, meth
           num_casts += RDL::Typecheck.get_num_casts if RDL::Typecheck.get_num_casts
+          num_choice_types += RDL::Typecheck.get_num_choice_types if RDL::Typecheck.get_num_choice_types
+          num_overloaded_meths += RDL::Typecheck.get_num_overloaded_meths if RDL::Typecheck.get_num_overloaded_meths
         rescue Exception => e
           if RDL::Config.instance.continue_on_errors
             RDL::Logging.log :inference, :debug_error, "Error: #{e}; recording %dyn"
@@ -895,9 +901,14 @@ module RDL
         report.to_sorbet 'infer_data.rbi' if render_report
 
         RDL::Logging.log :inference, :info, "Total number of type casts used: #{num_casts}."
+        RDL::Logging.log :inference, :info, "Total number of type checked calls to overloaded methods: #{num_overloaded_meths}."
+        num_choice_types += RDL::Type::Type.get_num_leq_choice_types
+        RDL::Logging.log :inference, :info, "Total number of ChoiceTypes used in these calls: #{num_choice_types}."
+        RDL::Logging.log :inference, :info, "Total number of unknown types created for library methods: #{$num_unknown_library_types}"
         if num_times == 1
           RDL::Logging.log :inference, :info, "Total time taken: #{time}."        
           RDL::Logging.log :inference, :info, "Total amount of time spent on stn: #{$stn}."
+          RDL::Logging.log :inference, :info, "Total number of STN unions: #{$stn_unions}."
         else
           sorted = run_times.sort
           ## Define proc that calculates median.
@@ -910,6 +921,7 @@ module RDL
           RDL::Logging.log :inference, :info, "Median time across #{num_times} runs: #{median}."
           RDL::Logging.log :inference, :info, "SIQR across #{num_times} runs: #{(q3 - q1)/2.0}."
           RDL::Logging.log :inference, :info, "Median time spent on stn: #{median_proc.call stn_times.sort}"
+          RDL::Logging.log :inference, :info, "Total number of STN unions: #{$stn_unions}."
         end
         RDL::Typecheck.log_heuristic_counts(:info)
       end
@@ -943,7 +955,7 @@ module RDL
   end
 
   def self.load_rails_schema
-    return unless defined?(Rails)
+    return if !defined?(Rails) || (File.basename($0) == "rake")
     ::Rails.application.eager_load! # load Rails app
     models = ActiveRecord::Base.descendants.each { |m|
       begin

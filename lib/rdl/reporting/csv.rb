@@ -12,28 +12,28 @@ module RDL::Reporting::CSV
     csv = open_file || CSV.open(path, 'wb')
 
     unless open_file
-      csv << ['Class', 'Method', 'Inferred Type', 'Original Type',
+      csv << ['Class', 'Method/Variable', 'Inferred Type', 'Original Type',
               'Source Code', 'Comments']
     end
 
-    @methods.each do |method|
+    @types.each do |t|
       raise 'Error: unknown class' unless @full_name
       class_str = @full_name
 
-      RDL::Logging.debug :inference, "Rendering #{RDL::Util.pp_klass_method(class_str, method.method_name)}"
+      RDL::Logging.debug :inference, "Rendering #{RDL::Util.pp_klass_method(class_str, t.name)}"
 
-      if method.type.solution.is_a?(RDL::Type::MethodType)
-        meth = method.type.solution
+      if t.type.solution.is_a?(RDL::Type::MethodType)
+        meth = t.type.solution
         inf_type = meth_to_s meth
       else
-        RDL::Logging.warning :inference, "Got a non-method type in type solutions: #{method.type.class}"
+        #RDL::Logging.warning :inference, "Got a non-method type in type solutions: #{method.type.class}"
 
         RDL::Type::VarType.print_XXX!
-        inf_type = method.type.to_s # This would be weird
+        inf_type = t.type.solution.to_s
       end
 
-      csv << [class_str, method.method_name, inf_type,
-              method.orig_type, method.source_code]
+      csv << [class_str, t.name, inf_type,
+              t.orig_type, t.source_code]
     end
 
     @children.each_key do |key|

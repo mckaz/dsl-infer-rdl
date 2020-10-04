@@ -4,8 +4,25 @@ class RDL::Heuristic
 
   @meth_cache = {}
 
+  @meth_to_cls_map = Hash.new {|h, m| h[m] = Set.new}  # maps a method to a set of classes with that method
+
+  def self.init_meth_to_cls  # to be called before the first call to struct_to_nominal
+    ObjectSpace.each_object(Module).each do |c|
+      #unless c.to_s.start_with?("#<Class") || c.to_s.start_with?("#<Module:")|| /[^:]*::[a-z]/.match?(c.to_s) || c.to_s.include?("ARGF")
+      unless c.to_s.start_with?("#<") || /[^:]*::[a-z]/.match?(c.to_s) || c.to_s.include?("ARGF")
+        class_methods = c.instance_methods | RDL::Globals.info.get_methods_from_class(c.to_s)
+        class_methods.each {|m|
+          unless (c.to_s == "Applitools::ArgumentGuard") ## really weird error that results from this library's intercepting of Hash#[]
+            @meth_to_cls_map[m] = @meth_to_cls_map[m].add(c)
+          end
+        }
+      end
+    end
+  end
+  
   def self.empty_cache!
     @meth_cache = {}
+    @meth_to_cls_map = Hash.new {|hash, m| hash[m] = Set.new}
   end
 
   def self.add(name, &blk)
@@ -13,7 +30,7 @@ class RDL::Heuristic
     raise RuntimeError, "Expected block to be provided for heuristic." if blk.nil?
     @rules[name] = blk
   end
-
+=begin
   def self.matching_classes(meth_names)
     meth_names.delete(:initialize)
     meth_names.delete(:new)
@@ -55,7 +72,69 @@ class RDL::Heuristic
     ## used to add and propagate here. Now that this is a heuristic, this should be done after running the rule.
     #var_type.add_and_propagate_upper_bound(union, nil)
   end
+=end
 
+  def self.matching_classes(meth_names)
+    meth_names.delete(:initialize)
+    meth_names.delete(:new)
+
+    # meth_names = meth_names.sort  # otherwise cache works almost only when meth_names.size == 1
+    if @meth_cache.key? meth_names
+      RDL::Logging.log :heuristic, :trace, "Cache used to find %d matching classes" % @meth_cache[meth_names].size
+      return @meth_cache[meth_names]
+    end
+
+    init_meth_to_cls if @meth_to_cls_map.empty?  # initialize @meth_to_cls on first call to matching_classes
+
+    # matching_classes = meth_names.map {|m| @meth_to_cls_map[m]}.reduce(:&).to_a  # faster but does not allow debugging
+    matching_classes = @meth_to_cls_map[meth_names[0]]
+    meth_names[1..-1].each_with_index do |m, index|
+      tmp = matching_classes.intersection(@meth_to_cls_map[m])
+      if tmp.empty? && !matching_classes.empty?
+        RDL::Logging.log :heuristic, :trace,
+                         "Found %d matching classes for methods: %s, but none of these classes have method %s" %
+                             [matching_classes.size, meth_names[0..index] * ", ", m]
+      end
+      matching_classes = tmp
+    end
+
+
+    RDL::Logging.log :heuristic, :trace, "Overall, found %d matching classes" % matching_classes.size
+    @meth_cache[meth_names] = matching_classes
+    matching_classes
+  end
+
+  def self.struct_to_nominal(var_type)
+    return unless (var_type.category == :arg) || (var_type.category == :var)#(var_type.category == :ivar) || (var_type.category == :cvar) || (var_type.category == :gvar) ## this rule only applies to args and (instance/class/global) variables
+    #return unless var_type.ubounds.all? { |t, loc| t.is_a?(RDL::Type::StructuralType) || t.is_a?(RDL::Type::VarType) } ## all upper bounds must be struct types or var types
+    return unless var_type.ubounds.any? { |t, loc| t.is_a?(RDL::Type::StructuralType) } ## upper bounds must include struct type(s)
+    struct_types = var_type.ubounds.select { |t, loc| t.is_a?(RDL::Type::StructuralType) }
+    struct_types.map! { |t, loc| t }
+    RDL::Logging.log :heuristic, :trace, "Found %d upper bounds of structural type" % struct_types.size
+    return if struct_types.empty?
+    meth_names = struct_types.map { |st| st.methods.keys }.flatten.uniq
+    meth_names.delete(:initialize)
+    meth_names.delete(:new)
+    return if meth_names.empty?
+    RDL::Logging.log :heuristic, :trace, "Corresponding methods are: %s" % (meth_names*", ")
+    matching_classes = matching_classes(meth_names)
+    matching_classes.reject! { |c| c.to_s.start_with?("#<Class") || /[^:]*::[a-z]/.match?(c.to_s) || c.to_s.include?("ARGF") } ## weird few constants where :: is followed by a lowecase letter... it's not a class and I can't find anything written about it.
+    RDL::Logging.log :heuristic, :trace, "Throwing out 'weird constants' leaves %d matching classes" % matching_classes.size
+    ## TODO: special handling for arrays/hashes/generics?
+    ## TODO: special handling for Rails models? see Bree's `active_record_match?` method
+    #raise "No matching classes found for structural types with methods #{meth_names}." if matching_classes.empty?
+    return if matching_classes.size > 10 ## in this case, just keep the struct types
+    nom_sing_types = matching_classes.map { |c| if c.singleton_class? then RDL::Type::SingletonType.new(RDL::Util.singleton_class_to_class(c)) else RDL::Type::NominalType.new(c) end }
+    RDL::Logging.log :heuristic, :trace, "These are: %s" % (nom_sing_types*", ")
+    union = RDL::Type::UnionType.new(*nom_sing_types).canonical
+    RDL::Logging.log :heuristic, :trace, "The union of which is canonicalized to %s" % union
+    #struct_types.each { |st| var_type.ubounds.delete_if { |s, loc| s.equal?(st) } } ## remove struct types from upper bounds
+
+
+    return union
+    ## used to add and propagate here. Now that this is a heuristic, this should be done after running the rule.
+    #var_type.add_and_propagate_upper_bound(union, nil)
+  end  
 
 end
 
@@ -98,6 +177,7 @@ RDL::Heuristic.add(:int_names) { |var| if var.base_name.end_with?("id") || (var.
 RDL::Heuristic.add(:int_array_name) { |var| if var.base_name.end_with?("ids") || (var.base_name.end_with? "nums") || (var.base_name.end_with? "counts") then RDL::Globals.parser.scan_str "#T Array<Integer>" end }
 RDL::Heuristic.add(:predicate_method) { |var| if var.base_name.end_with?("?") then RDL::Globals.types[:bool] end }
 RDL::Heuristic.add(:string_name) { |var| if var.base_name.end_with?("name") then RDL::Globals.types[:string] end }
+
 RDL::Heuristic.add(:hash_access) { |var|
   old_var = var
   var = var.type if old_var.is_a?(RDL::Type::OptionalType)

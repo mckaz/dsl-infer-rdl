@@ -107,6 +107,9 @@ module RDL::Typecheck
             RDL::Logging.log :hueristic, :debug, "Heuristic Applied: #{name}"
             @new_constraints = true if !new_cons.empty?
             RDL::Logging.log :inference, :trace, "New Constraints branch A" if !new_cons.empty?
+            if (name.to_s == "struct_to_nominal") && typ.is_a?(RDL::Type::UnionType)
+              $stn_unions += 1
+            end
             @heuristic_counts[name] += 1
             return typ
             #sol = typ
@@ -303,9 +306,13 @@ module RDL::Typecheck
         end
       end
 
-      if !meth.to_s.include?("@") && !meth.to_s.include?("$")#orig_typ.is_a?(RDL::Type::MethodType)
+      if meth.to_s.include?("@") || meth.to_s.include?("$")#orig_typ.is_a?(RDL::Type::MethodType)
+        ast = nil
+        code = nil
+      else
         ast = RDL::Typecheck.get_ast(klass, meth)
         code = ast.loc.expression.source
+      end
         # if RDL::Util.has_singleton_marker(klass)
         #   comment = RDL::Util.to_class(RDL::Util.remove_singleton_marker(klass)).method(meth).comment
         # else
@@ -313,7 +320,7 @@ module RDL::Typecheck
         # end
         # csv << [klass, meth, typ, orig_typ, code] #, comment
 
-        report[klass] << { klass: klass, method_name: meth, type: typ,
+      report[klass] << { klass: klass, name: meth, type: typ,
                            orig_type: orig_typ, source_code: code }
 
 
@@ -322,7 +329,6 @@ module RDL::Typecheck
         # else
         #  complete_types << [klass, meth, typ, orig_typ, code, comment]
         # end
-      end
     }
 
     RDL::Logging.log_header :inference, :info, "Extraction Complete"
@@ -331,7 +337,7 @@ module RDL::Typecheck
     RDL::Logging.log :inference, :info, "Total # variable types: #{var_types}"
     RDL::Logging.log :inference, :info, "Total # individual types: #{total_potential}"
   rescue => e
-    puts "GOT ERROR #{e}"
+    puts "GOT ERROR #{e.full_message}"
     RDL::Logging.log :inference, :error, "Report Generation Error"
     RDL::Logging.log :inference, :debug_error, "... got #{e}"
     raise e unless RDL::Config.instance.continue_on_errors
@@ -357,6 +363,7 @@ module RDL::Typecheck
       typ_sols = {}
 
       RDL::Logging.log :inference, :info, "[#{counter}] Running solution extraction..."
+      RDL::Type::Type.reset_num_leq_choice_types
 
       RDL::Globals.constrained_types.each { |klass, name|
         begin

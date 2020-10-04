@@ -344,6 +344,8 @@ module RDL::Typecheck
     else
       targs_dup = Hash[targs.map { |k, t| [k, t.copy] }] ## args can be mutated in method body. duplicate to avoid this. TODO: check on this
       @num_casts = 0
+      @num_choice_types = 0
+      @num_overloaded_meths = 0
       _, body_type = tc(scope, Env.new(targs_dup), body) ## TODO: need separate argument indicating we're performing inference? or is this exactly the same as type checking...
     end
 
@@ -404,6 +406,8 @@ module RDL::Typecheck
       else
         targs_dup = Hash[targs.map { |k, t| [k, t.copy] }] ## args can be mutated in method body. duplicate to avoid this. TODO: check on this
         @num_casts = 0
+        @num_choice_types = 0
+        @num_overloaded_meths = 0
         _, body_type = tc(scope, Env.new(targs_dup), body)
       end
       error :bad_return_type, [body_type.to_s, type.ret.to_s], body unless body.nil? || meth == :initialize ||RDL::Type::Type.leq(body_type, type.ret, ast: ast)
@@ -418,6 +422,14 @@ module RDL::Typecheck
 
   def self.get_num_casts
     return @num_casts
+  end
+
+  def self.get_num_choice_types
+    return @num_choice_types
+  end
+
+  def self.get_num_overloaded_meths
+    return @num_overloaded_meths
   end
 
   ### TODO: clean up below. Should probably incorporate it into `targs.merge` call in `self.typecheck`.
@@ -1149,11 +1161,15 @@ RUBY
       # retry: not allowed
       # redo: after loop guard, which is same as break
       old_num_casts = @num_casts ## only want to count casts in loop once
+      old_num_choice_types = @num_choice_types
+      old_num_overloaded_meths = @num_overloaded_meths
       env_break, _ = tc(scope, env, e.children[0]) # guard can have any type, may exit after checking guard
       scope_merge(scope, break: env_break, tbreak: RDL::Globals.types[:nil], next: env, redo: env_break) { |lscope|
 
         begin
           @num_casts = 0
+          @num_choice_types = 0
+          @num_overloaded_meths = 0
           old_break = lscope[:break]
           old_next = lscope[:next]
           old_tbreak = lscope[:tbreak]
@@ -1165,6 +1181,8 @@ RUBY
           lscope[:break] = lscope[:redo] = Env.join(e, lscope[:break], lscope[:redo], env_guard)
         end until old_break == lscope[:break] && old_next == lscope[:next] && old_tbreak == lscope[:tbreak]
         @num_casts += old_num_casts
+        @num_choice_types += old_num_choice_types
+        @num_overloaded_meths += old_num_overloaded_meths
         [lscope[:break], lscope[:tbreak].canonical]
       }
     when :while_post, :until_post
@@ -1173,6 +1191,8 @@ RUBY
       # retry: not allowed
       # redo: beginning of body, which is same as after guard, i.e., same as break
       old_num_casts = @num_casts ## only want to count casts in loop once
+      old_num_choice_types = @num_choice_types
+      old_num_overloaded_meths = @num_overloaded_meths
       scope_merge(scope, break: nil, tbreak: RDL::Globals.types[:nil], next: nil, redo: nil) { |lscope|
         if e.children[1]
           env_body, _ = tc(lscope, env, e.children[1])
@@ -1180,6 +1200,8 @@ RUBY
         end
         begin
           @num_casts = 0
+          @num_choice_types = 0
+          @num_overloaded_meths = 0          
           old_break = lscope[:break]
           old_next = lscope[:next]
           old_tbreak = lscope[:tbreak]
@@ -1191,6 +1213,8 @@ RUBY
           end
         end until old_break == lscope[:break] && old_next == lscope[:next] && old_tbreak == lscope[:tbreak]
         @num_casts += old_num_casts
+        @num_choice_types += old_num_choice_types
+        @num_overloaded_meths += old_num_overloaded_meths
         [lscope[:break], lscope[:tbreak].canonical]
       }
     when :for
@@ -1250,8 +1274,12 @@ RUBY
         # collection is returned. But it's hard to tell statically if there are only exits via break, so
         # conservatively assume that at least the collection is returned.
         old_num_casts = @num_casts ## only want to count casts in loop once
+        old_num_choice_types = @num_choice_types
+        old_num_overloaded_meths = @num_overloaded_meths
         begin
           @num_casts = 0
+          @num_choice_types = 0
+          @num_overloaded_meths = 0
           old_break = lscope[:break]
           old_tbreak = lscope[:tbreak]
           old_tnext = lscope[:tnext]
@@ -1262,6 +1290,8 @@ RUBY
           end
         end until old_break == lscope[:break] && old_tbreak == lscope[:tbreak] && old_tnext == lscope[:tnext]
         @num_casts += old_num_casts
+        @num_choice_types += old_num_choice_types
+        @num_overloaded_meths += old_num_overloaded_meths
         [lscope[:break], lscope[:tbreak].canonical] ## going very conservative on this one
       }
     when :break, :redo, :next, :retry
@@ -1303,8 +1333,12 @@ RUBY
       # is never triggered
       scope_merge(scope, retry: env, exn: nil) { |rscope|
         old_num_casts = @num_casts ## only want to count casts in loop once
+        old_num_choice_types = @num_choice_types
+        old_num_overloaded_meths = @num_overloaded_meths
         begin
           @num_casts = 0
+          @num_choice_types = 0
+          @num_overloaded_meths = 0
           old_retry = rscope[:retry]
           env_body, tbody = tc(rscope, rscope[:retry], e.children[0])
           tres = [tbody] # note throw away inferred types from previous iterations---should be okay since should be monotonic
@@ -1323,6 +1357,8 @@ RUBY
           end
         end until old_retry == rscope[:retry]
         @num_casts += old_num_casts
+        @num_choice_types += old_num_choice_types
+        @num_overloaded_meths += old_num_overloaded_meths
         # TODO: variables newly bound in *env_res should be unioned with nil
         [Env.join(e, *env_res), RDL::Type::UnionType.new(*tres).canonical]
       }
@@ -1910,7 +1946,7 @@ RUBY
       ts = filter_comp_types(ts, false)
       error :no_non_dep_types, [trecv, meth], e unless !ts.empty?
     end
-
+    @num_overloaded_meths += 1 if ts.size > 1
     RDL::Type.expand_product(tactuals).each { |tactuals_expanded|
       # AT LEAST ONE of the possible intesection arms must match
       trets_tmp = []
@@ -2015,7 +2051,7 @@ RUBY
       end
     }
     ## Down here EITHER: apply all deferred constraints, continue with trets OR turn choices into ChoiceTypes, apply those deferred constraints, turn trets into [ret_choice_type]
-
+    used_choice_type = false
     if arg_choices.empty?
       apply_deferred_constraints(deferred_constraints, e) if !deferred_constraints.empty?
     else
@@ -2025,6 +2061,7 @@ RUBY
         if choice_hash.values.uniq.size == 1
           new_dcs << [vartype, choice_hash.values[0]]
         else
+          used_choice_type = true      
           t = RDL::Type::ChoiceType.new(choice_hash)
           new_dcs << [vartype, t]
           ct_args << t
@@ -2036,12 +2073,14 @@ RUBY
         new_ret = ret_choice.values[0]
         ct_args.each { |ct| ct.add_connecteds(*ct_args) }
       else
+        used_choice_type = true      
         new_ret = RDL::Type::ChoiceType.new(ret_choice)
         (ct_args+[new_ret]).each { |ct| ct.add_connecteds(new_ret, *ct_args) }
       end
       trets = [new_ret]
       apply_deferred_constraints(new_dcs, e) if !new_dcs.empty?
     end
+    @num_choice_types += 1 if used_choice_type
 
     if trets.empty? # no possible matching call
       msg = <<RUBY
@@ -2365,7 +2404,10 @@ RUBY
     return t if t # simplest case, no need to walk inheritance hierarchy
     return [make_unknown_method_type(klass, name)] if RDL::Globals.to_infer.values.any? { |set| set.include?([klass, name]) }
     klass_name = RDL::Util.has_singleton_marker(klass) ? RDL::Util.remove_singleton_marker(klass) : klass
-    return [make_unknown_method_type(klass, name)] if make_unknown && (name == :initialize) && (RDL::Util.to_class(klass_name).instance_method(:initialize).owner == RDL::Util.to_class(klass_name)) # don't want to walk up hierarchy in initialize case where it is specifically defined for this class
+    if make_unknown && (name == :initialize) && (RDL::Util.to_class(klass_name).instance_method(:initialize).owner == RDL::Util.to_class(klass_name)) # don't want to walk up hierarchy in initialize case where it is specifically defined for this class
+      $num_unknown_library_types += 1
+      return [make_unknown_method_type(klass, name)]
+    end
     the_klass = RDL::Util.to_class(klass)
     is_singleton = RDL::Util.has_singleton_marker(klass)
     included = RDL::Util.to_class(klass.gsub("[s]", "")).included_modules
@@ -2426,6 +2468,7 @@ RUBY
       #return nil
       ## Trying new approach: create unknown method type for any methods without types.
       if make_unknown
+        $num_unknown_library_types += 1
         return [make_unknown_method_type(klass, name)] if (RDL::Util.to_class(klass).instance_methods + RDL::Util.to_class(klass).private_instance_methods).include?(name)
       else
         return nil

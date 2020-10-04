@@ -7,6 +7,16 @@ module RDL::Type
   class Type
     @@contract_cache = {}
 
+    @leq_choice_types = 0
+
+    def self.get_num_leq_choice_types
+      @leq_choice_types
+    end
+
+    def self.reset_num_leq_choice_types
+      @leq_choice_types = 0
+    end
+
     def name
       RDL::Logging.log :typecheck, :error, "Attempted to access name field for #{self.class}"
       '_NAME_ERROR'
@@ -199,6 +209,7 @@ module RDL::Type
                 RDL::Type::Type.leq(vartype, choice_hash.values[0], nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
               else
                 t = RDL::Type::ChoiceType.new(choice_hash)
+                @leq_choice_types += 1
                 RDL::Type::Type.leq(vartype, t, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 all_cts << t
               end
@@ -210,6 +221,7 @@ module RDL::Type
                 RDL::Type::Type.leq(choice_hash.values[0], vartype, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
               else
                 t = RDL::Type::ChoiceType.new(choice_hash)
+                @leq_choice_types += 1
                 RDL::Type::Type.leq(t, vartype, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 all_cts << t
               end
@@ -335,6 +347,7 @@ module RDL::Type
                   RDL::Type::Type.leq(vartype, choice_hash.values[0], nil, ileft, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 else
                   t = RDL::Type::ChoiceType.new(choice_hash)
+                  @leq_choice_types += 1
                   RDL::Type::Type.leq(vartype, t, nil, ileft, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                   all_cts << t
                 end
@@ -345,6 +358,7 @@ module RDL::Type
                   RDL::Type::Type.leq(choice_hash.values[0], vartype, nil, ileft, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 else
                   t = RDL::Type::ChoiceType.new(choice_hash)
+                  @leq_choice_types += 1
                   RDL::Type::Type.leq(t, vartype, nil, ileft, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                   all_cts << t
                 end
@@ -441,6 +455,7 @@ module RDL::Type
                   RDL::Type::Type.leq(vartype, choice_hash.values[0], nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 else
                   t = RDL::Type::ChoiceType.new(choice_hash)
+                  @leq_choice_types += 1
                   RDL::Type::Type.leq(vartype, t, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                   all_cts << t
                 end
@@ -451,6 +466,7 @@ module RDL::Type
                   RDL::Type::Type.leq(choice_hash.values[0], vartype, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                 else
                   t = RDL::Type::ChoiceType.new(choice_hash)
+                  @leq_choice_types += 1
                   RDL::Type::Type.leq(t, vartype, nil, false, deferred_constraints, no_constraint: no_constraint, ast: ast, propagate: propagate, new_cons: new_cons, removed_choices: removed_choices)
                   all_cts << t
                 end
